@@ -1,4 +1,3 @@
-
 import os
 import argparse
 import yaml
@@ -6,8 +5,50 @@ from pathlib import Path
 import glob
 import shutil
 from datetime import datetime
+import textwrap
 
 __version__ = "1.0.0"
+
+class CustomFormatter(argparse.HelpFormatter):
+    def __init__(self, prog):
+        super().__init__(prog, max_help_position=40, width=100)
+
+    def _format_action(self, action):
+        if action.help is not None:
+            help_text = self._expand_help(action)
+            if action.default != argparse.SUPPRESS:
+                help_text += f" (default: {action.default})"
+            help_lines = textwrap.wrap(help_text, 80)
+            help_text = '\n'.join(help_lines)
+        else:
+            help_text = ''
+
+        if action.option_strings:
+            option_string = ', '.join(action.option_strings)
+            option_string = f'{option_string:<35}'
+        else:
+            option_string = ''
+
+        return f"  {option_string}{help_text}\n\n"
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        return super()._format_usage(usage, actions, groups, prefix) + '\n'
+
+    def _split_lines(self, text, width):
+        return text.splitlines()
+
+    def _format_env_var(self, var, description):
+        var_string = f'{var:<35}'
+        desc_lines = textwrap.wrap(description, 60)
+        desc_text = '\n'.join(desc_lines)
+        return f"  {var_string}{desc_text}\n\n"
+
+    def format_help(self):
+        help = super().format_help()
+        env_vars = "\n\nEnvironment Variables:\n\n"
+        env_vars += self._format_env_var("KUBECONFIG_LOCATION", "Override the default kubeconfig location")
+        env_vars += self._format_env_var("DEFAULT_DOWNLOAD_LOCATION", "Set the default download location for new kubeconfig files")
+        return f"{help}{env_vars}"
 
 def get_kubeconfig_path(args):
     if args.kubeconfig:
@@ -84,7 +125,7 @@ def merge_configs(existing_config, new_config):
 def create_backup(kubeconfig_path):
     backup_dir = kubeconfig_path.parent / 'kubezap_backups'
     backup_dir.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     backup_path = backup_dir / f"kubeconfig_backup_{timestamp}"
     shutil.copy2(kubeconfig_path, backup_path)
     return backup_path
@@ -94,7 +135,7 @@ def manage_backups(backup_dir, max_backups=10):
     for old_backup in backups[max_backups:]:
         old_backup.unlink()
 
-def update_kubeconfig(kubeconfig_path, new_config_files):
+def update_kubeconfig(kubeconfig_path, new_config_files, max_backups):
     backup_path = create_backup(kubeconfig_path)
     
     try:
@@ -124,7 +165,7 @@ def update_kubeconfig(kubeconfig_path, new_config_files):
         with open(kubeconfig_path, 'w') as f:
             yaml.dump(existing_config, f)
 
-        manage_backups(backup_path.parent)
+        manage_backups(backup_path.parent, max_backups)
         return changes
     except Exception as e:
         print(f"Error updating kubeconfig: {e}")
@@ -133,42 +174,72 @@ def update_kubeconfig(kubeconfig_path, new_config_files):
         return []
 
 def main():
-    parser = argparse.ArgumentParser(description='Update kubeconfig with new configurations.')
+    description = '''
+    KubeZap: A tool to update kubeconfig with new configurations.
+
+    This tool allows you to merge new kubeconfig files into your existing kubeconfig,
+    while maintaining backups and providing detailed information about the changes made.
+
+    Features:
+    - Automatic backup creation
+    - Customizable number of backup files to keep
+    - Automatic rollback on failure
+    - Detailed merge information in verbose mode
+    '''
+
+    parser = argparse.ArgumentParser(
+        description=description,
+        formatter_class=CustomFormatter
+    )
+    
     parser.add_argument('--kubeconfig', help='Path to the kubeconfig file')
     parser.add_argument('--download-location', help='Path to the download location for new configs')
-    parser.add_argument('--conf-name', default='config*.yaml', help='Pattern for config file names')
-    parser.add_argument('-n', '--number-of-configs', type=int, default=1, help='Number of config files to process')
+    parser.add_argument('--conf-name', default='config*', help='Pattern for config file names')
+    parser.add_argument('-n', '--number-of-configs', type=int, default=1, 
+                        help='Number of config files to process')
+    parser.add_argument('-vv', action='store_true', help='Enable verbose output')
+    parser.add_argument('-v', '--version', action='version', 
+                        version=f'KubeZap v{__version__}')
+    parser.add_argument('--backup', type=int, default=5, 
+                        help='Number of backup files to keep')
+    
     args = parser.parse_args()
 
-    print(f"KubeZap v{__version__}")
-    print("Features:")
-    print("- Automatic backup creation")
-    print("- Keeps 10 most recent backups")
-    print("- Automatic rollback on failure")
+    if args.vv:
+        print("Features:")
+        print("- Automatic backup creation")
+        print(f"- Keeps {args.backup} most recent backups")
+        print("- Automatic rollback on failure")
 
     kubeconfig_path = get_kubeconfig_path(args)
     download_location = get_download_location(args)
     
-    print(f"\nUsing kubeconfig: {kubeconfig_path}")
-    print(f"Looking for new configs in: {download_location}")
+    if args.vv:
+        print(f"\nUsing kubeconfig: {kubeconfig_path}")
+        print(f"Looking for new configs in: {download_location}")
     
     new_config_files = get_config_files(download_location, args.conf_name, args.number_of_configs)
     
     if not new_config_files:
-        print(f"\nNo matching config files found in {download_location}")
+        print(f"No matching config files found in {download_location}")
         return
 
-    print("\nUpdating kubeconfig...")
-    changes = update_kubeconfig(kubeconfig_path, new_config_files)
+    if args.vv:
+        print("\nUpdating kubeconfig...")
+    changes = update_kubeconfig(kubeconfig_path, new_config_files, args.backup)
 
     if changes:
-        print("\nChanges made:")
+        print("Changes made:")
         for change in changes:
             print(f"- {change}")
-        print(f"\nBackup created in: {kubeconfig_path.parent / 'kubezap_backups'}")
+        if args.vv:
+            print(f"\nBackup created in: {kubeconfig_path.parent / 'kubezap_backups'}")
     else:
-        print("\nNo changes were made. Possible error occurred and changes were rolled back.")
+        print("No changes were made. Possible error occurred and changes were rolled back.")
 
 if __name__ == '__main__':
-    main()
-
+    try:
+        main()
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        print("For more information, run with the -vv flag.")
