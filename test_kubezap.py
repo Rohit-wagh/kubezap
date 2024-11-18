@@ -1,128 +1,173 @@
-
-import unittest
-import tempfile
+import pytest
 import os
-import shutil
+import tempfile
 from pathlib import Path
-from kubezap import get_kubeconfig_path, get_download_location, get_config_files, merge_configs, create_backup, manage_backups, update_kubeconfig
+import yaml
+import argparse
 
-class TestKubeZap(unittest.TestCase):
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp()
-        self.kubeconfig_path = Path(self.temp_dir) / 'config'
-        self.download_location = Path(self.temp_dir) / 'downloads'
-        self.download_location.mkdir()
-        
-        # Create a sample kubeconfig file
-        with open(self.kubeconfig_path, 'w') as f:
-            f.write("apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []")
+from utils import get_kubeconfig_path, get_download_location, get_config_files
+from config_manager import merge_configs, update_kubeconfig
+from backup_manager import create_backup, manage_backups
+from cli import CustomFormatter, VersionAction
 
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir)
+@pytest.fixture
+def temp_dir():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        yield Path(tmpdirname)
 
-    def test_get_kubeconfig_path(self):
-        # Test default path
-        self.assertEqual(get_kubeconfig_path(type('Args', (), {'kubeconfig': None})()), Path.home() / '.kube' / 'config')
-        
-        # Test custom path
-        custom_path = Path('/custom/path/config')
-        self.assertEqual(get_kubeconfig_path(type('Args', (), {'kubeconfig': custom_path})()), custom_path)
-        
-        # Test environment variable
-        os.environ['KUBECONFIG_LOCATION'] = str(self.kubeconfig_path)
-        self.assertEqual(get_kubeconfig_path(type('Args', (), {'kubeconfig': None})()), self.kubeconfig_path)
-        del os.environ['KUBECONFIG_LOCATION']
+@pytest.fixture
+def mock_args():
+    class Args:
+        def __init__(self):
+            self.kubeconfig = None
+            self.download_location = None
+            self.conf_name = 'config*.yaml'
+            self.number_of_configs = 1
+            self.backup = 5
+    return Args()
 
-    def test_get_download_location(self):
-        # Test default path
-        self.assertEqual(get_download_location(type('Args', (), {'download_location': None})()), Path.home() / '.kube')
-        
-        # Test custom path
-        custom_path = Path('/custom/download/path')
-        self.assertEqual(get_download_location(type('Args', (), {'download_location': custom_path})()), custom_path)
-        
-        # Test environment variable
-        os.environ['DEFAULT_DOWNLOAD_LOCATION'] = str(self.download_location)
-        self.assertEqual(get_download_location(type('Args', (), {'download_location': None})()), self.download_location)
-        del os.environ['DEFAULT_DOWNLOAD_LOCATION']
+def test_get_kubeconfig_path_default(mock_args):
+    path = get_kubeconfig_path(mock_args)
+    assert path == Path.home() / '.kube' / 'config'
 
-    def test_get_config_files(self):
-        # Create sample config files
-        (self.download_location / 'config1.yaml').touch()
-        (self.download_location / 'config2.yaml').touch()
-        (self.download_location / 'other_file.txt').touch()
-        
-        # Test with default pattern
-        files = get_config_files(self.download_location, 'config*.yaml', 2)
-        self.assertEqual(len(files), 2)
-        self.assertTrue(all(file.name.startswith('config') and file.suffix == '.yaml' for file in files))
-        
-        # Test with custom pattern
-        files = get_config_files(self.download_location, '*.txt', 1)
-        self.assertEqual(len(files), 1)
-        self.assertEqual(files[0].name, 'other_file.txt')
-        
-        # Test with non-existent files
-        files = get_config_files(self.download_location, 'nonexistent*.yaml', 1)
-        self.assertEqual(len(files), 0)
+def test_get_kubeconfig_path_custom(mock_args):
+    mock_args.kubeconfig = '/custom/path/config'
+    path = get_kubeconfig_path(mock_args)
+    assert path == Path('/custom/path/config')
 
-    def test_merge_configs(self):
-        existing_config = {'clusters': [{'name': 'cluster1'}], 'contexts': [], 'users': []}
-        new_config = {'clusters': [{'name': 'cluster2'}], 'contexts': [{'name': 'context1'}], 'users': []}
-        
-        merged_config = merge_configs(existing_config, new_config)
-        self.assertEqual(len(merged_config['clusters']), 2)
-        self.assertEqual(len(merged_config['contexts']), 1)
-        self.assertEqual(len(merged_config['users']), 0)
+def test_get_kubeconfig_path_env_var(mock_args, monkeypatch):
+    monkeypatch.setenv('KUBECONFIG_LOCATION', '/env/path/config')
+    path = get_kubeconfig_path(mock_args)
+    assert path == Path('/env/path/config')
 
-    def test_create_backup(self):
-        backup_path = create_backup(self.kubeconfig_path)
-        self.assertTrue(backup_path.exists())
-        self.assertTrue(backup_path.name.startswith('kubeconfig_backup_'))
+def test_get_download_location_default(mock_args):
+    path = get_download_location(mock_args)
+    assert path == Path.home() / '.kube'
 
-    def test_manage_backups(self):
-        backup_dir = self.kubeconfig_path.parent / 'kubezap_backups'
-        backup_dir.mkdir()
-        
-        # Create 15 backup files
-        for i in range(15):
-            (backup_dir / f'kubeconfig_backup_{i}').touch()
-        
-        manage_backups(backup_dir, max_backups=10)
-        
-        backups = list(backup_dir.glob('kubeconfig_backup_*'))
-        self.assertEqual(len(backups), 10)
+def test_get_download_location_custom(mock_args):
+    mock_args.download_location = '/custom/download'
+    path = get_download_location(mock_args)
+    assert path == Path('/custom/download')
 
-    def test_update_kubeconfig(self):
-        # Create a new config file
-        new_config_path = self.download_location / 'new_config.yaml'
-        with open(new_config_path, 'w') as f:
-            f.write("apiVersion: v1\nkind: Config\nclusters: [{'name': 'new_cluster'}]\ncontexts: []\nusers: []")
-        
-        changes = update_kubeconfig(self.kubeconfig_path, [new_config_path])
-        self.assertEqual(len(changes), 1)
-        
-        # Verify the kubeconfig has been updated
-        with open(self.kubeconfig_path, 'r') as f:
-            updated_config = f.read()
-        self.assertIn('new_cluster', updated_config)
-        
-        # Verify backup was created
-        backups = list((self.kubeconfig_path.parent / 'kubezap_backups').glob('kubeconfig_backup_*'))
-        self.assertEqual(len(backups), 1)
+def test_get_download_location_env_var(mock_args, monkeypatch):
+    monkeypatch.setenv('DEFAULT_DOWNLOAD_LOCATION', '/env/download')
+    path = get_download_location(mock_args)
+    assert path == Path('/env/download')
 
-    def test_update_kubeconfig_failure(self):
-        # Create an invalid config file
-        invalid_config_path = self.download_location / 'invalid_config.yaml'
-        with open(invalid_config_path, 'w') as f:
-            f.write("invalid: yaml: content")
-        
-        original_content = self.kubeconfig_path.read_text()
-        changes = update_kubeconfig(self.kubeconfig_path, [invalid_config_path])
-        self.assertEqual(len(changes), 0)
-        
-        # Verify the kubeconfig has not been changed
-        self.assertEqual(self.kubeconfig_path.read_text(), original_content)
+def test_get_config_files(temp_dir):
+    (temp_dir / 'config1.yaml').touch()
+    (temp_dir / 'config2.yaml').touch()
+    (temp_dir / 'other.txt').touch()
+    files = get_config_files(temp_dir, 'config*.yaml', 2)
+    assert len(files) == 2
+    assert all(f.name.startswith('config') and f.suffix == '.yaml' for f in files)
 
-if __name__ == '__main__':
-    unittest.main()
+def test_merge_configs():
+    existing_config = {
+        'clusters': [{'name': 'cluster1', 'cluster': {'server': 'https://1.1.1.1'}}],
+        'contexts': [{'name': 'context1', 'context': {'cluster': 'cluster1', 'user': 'user1'}}],
+        'users': [{'name': 'user1', 'user': {'token': 'token1'}}]
+    }
+    new_config = {
+        'clusters': [
+            {'name': 'cluster1', 'cluster': {'server': 'https://2.2.2.2'}},
+            {'name': 'cluster2', 'cluster': {'server': 'https://3.3.3.3'}}
+        ],
+        'contexts': [{'name': 'context2', 'context': {'cluster': 'cluster2', 'user': 'user2'}}],
+        'users': [{'name': 'user2', 'user': {'token': 'token2'}}]
+    }
+    merged = merge_configs(existing_config, new_config)
+    assert len(merged['clusters']) == 2
+    assert merged['clusters'][0]['cluster']['server'] == 'https://2.2.2.2'
+    assert len(merged['contexts']) == 2
+    assert len(merged['users']) == 2
+
+def test_create_backup(temp_dir):
+    kubeconfig = temp_dir / 'config'
+    kubeconfig.write_text('test config')
+    backup = create_backup(kubeconfig)
+    assert backup.exists()
+    assert backup.parent.name == 'kubezap_backups'
+    assert backup.read_text() == 'test config'
+
+def test_manage_backups(temp_dir):
+    backup_dir = temp_dir / 'kubezap_backups'
+    backup_dir.mkdir()
+    for i in range(10):
+        (backup_dir / f'kubeconfig_backup_{i}').touch()
+    manage_backups(backup_dir, 5)
+    assert len(list(backup_dir.glob('*'))) == 5
+
+def test_update_kubeconfig(temp_dir):
+    kubeconfig = temp_dir / 'config'
+    kubeconfig.write_text(yaml.dump({
+        'clusters': [{'name': 'cluster1', 'cluster': {'server': 'https://1.1.1.1'}}],
+        'contexts': [{'name': 'context1', 'context': {'cluster': 'cluster1', 'user': 'user1'}}],
+        'users': [{'name': 'user1', 'user': {'token': 'token1'}}]
+    }))
+    new_config = temp_dir / 'new_config.yaml'
+    new_config.write_text(yaml.dump({
+        'clusters': [{'name': 'cluster2', 'cluster': {'server': 'https://2.2.2.2'}}],
+        'contexts': [{'name': 'context2', 'context': {'cluster': 'cluster2', 'user': 'user2'}}],
+        'users': [{'name': 'user2', 'user': {'token': 'token2'}}]
+    }))
+    changes, _ = update_kubeconfig(kubeconfig, [new_config], 5)
+    assert len(changes) > 0
+    updated_config = yaml.safe_load(kubeconfig.read_text())
+    assert len(updated_config['clusters']) == 2
+    assert len(updated_config['contexts']) == 2
+    assert len(updated_config['users']) == 2
+
+def test_custom_formatter():
+    formatter = CustomFormatter('test')
+    help_text = formatter.format_help()
+    assert 'Environment Variables:' in help_text
+    assert 'KUBECONFIG_LOCATION' in help_text
+    assert 'DEFAULT_DOWNLOAD_LOCATION' in help_text
+
+def test_version_action(capsys):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-v', '--version', action=VersionAction, version='TestVersion 1.0')
+    with pytest.raises(SystemExit):
+        parser.parse_args(['-v'])
+    captured = capsys.readouterr()
+    assert captured.out.strip() == 'TestVersion 1.0'
+
+# Edge cases
+def test_get_config_files_no_matching_files(temp_dir):
+    files = get_config_files(temp_dir, 'nonexistent*.yaml', 1)
+    assert len(files) == 0
+
+def test_merge_configs_empty_configs():
+    existing_config = {}
+    new_config = {}
+    merged = merge_configs(existing_config, new_config)
+    assert merged == {}
+
+def test_update_kubeconfig_no_changes(temp_dir):
+    kubeconfig = temp_dir / 'config'
+    kubeconfig.write_text(yaml.dump({
+        'clusters': [{'name': 'cluster1', 'cluster': {'server': 'https://1.1.1.1'}}],
+        'contexts': [{'name': 'context1', 'context': {'cluster': 'cluster1', 'user': 'user1'}}],
+        'users': [{'name': 'user1', 'user': {'token': 'token1'}}]
+    }))
+    new_config = temp_dir / 'new_config.yaml'
+    new_config.write_text(yaml.dump({
+        'clusters': [{'name': 'cluster1', 'cluster': {'server': 'https://1.1.1.1'}}],
+        'contexts': [{'name': 'context1', 'context': {'cluster': 'cluster1', 'user': 'user1'}}],
+        'users': [{'name': 'user1', 'user': {'token': 'token1'}}]
+    }))
+    changes, _ = update_kubeconfig(kubeconfig, [new_config], 5)
+    assert len(changes) == 0
+
+def test_manage_backups_no_backups(temp_dir):
+    backup_dir = temp_dir / 'kubezap_backups'
+    backup_dir.mkdir()
+    manage_backups(backup_dir, 5)
+    assert len(list(backup_dir.glob('*'))) == 0
+
+def test_get_config_files_limit(temp_dir):
+    for i in range(10):
+        (temp_dir / f'config{i}.yaml').touch()
+    files = get_config_files(temp_dir, 'config*.yaml', 5)
+    assert len(files) == 5

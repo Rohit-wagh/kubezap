@@ -5,12 +5,12 @@ KubeZap is a command-line tool that simplifies the process of updating kubeconfi
 
 ## Features
 
+- Merge new kubeconfig files into existing kubeconfig
 - Automatic backup creation before updating kubeconfig
 - Customizable number of backup files to keep
 - Automatic rollback on failure
-- Support for multiple cluster configurations
 - Detailed merge information in verbose mode
-- Cross-platform compatibility (Mac, Windows, Linux)
+- Diff output to show exact changes
 
 ## Installation
 
@@ -27,21 +27,19 @@ kubezap [OPTIONS]
 ```
 
 Options:
-- `--kubeconfig KUBECONFIG`: Path to the kubeconfig file
-- `--download-location DOWNLOAD_LOCATION`: Path to the download location for new configs
-- `--conf-name CONF_NAME`: Pattern for config file names (default: config*.yaml)
-- `-n NUMBER_OF_CONFIGS, --number-of-configs NUMBER_OF_CONFIGS`: Number of config files to process (default: 1)
+- `--kubeconfig PATH`: Path to the kubeconfig file
+- `--download-location PATH`: Path to the download location for new configs
+- `--conf-name PATTERN`: Pattern for config file names (default: config*.yaml)
+- `-n, --number-of-configs NUMBER`: Number of config files to process (default: 1)
 - `-vv`: Enable verbose output
-- `--backup BACKUP`: Number of backup files to keep (default: 5)
-- `-v, --version`: Show program's version number and exit
-- `-h, --help`: Show this help message and exit
+- `-v, --version`: Show the version number and exit
+- `--backup NUMBER`: Number of backup files to keep (default: 5)
+- `-d, --diff`: Show diff of changes
 
 ## Environment Variables
 
 - `KUBECONFIG_LOCATION`: Override the default kubeconfig location
 - `DEFAULT_DOWNLOAD_LOCATION`: Set the default download location for new kubeconfig files
-
-Note: Information about these environment variables is also available in the command-line help (use `kubezap --help` to view). The help output displays these variables with the same formatting as the command-line options for improved readability.
 
 ## Examples
 
@@ -60,40 +58,22 @@ Note: Information about these environment variables is also available in the com
    kubezap -n 3 --backup 10
    ```
 
-4. Enable verbose output:
+4. Show diff of changes:
    ```
-   kubezap -vv
+   kubezap -d
    ```
-
-## Building from source
-
-To build KubeZap from source:
-
-1. Clone the repository
-2. Install the required dependencies:
-   - For basic functionality: `pip install PyYAML`
-   - For development (including testing and linting): `pip install -r requirements.txt`
-3. Run `python setup.py install`
 
 ## Development
 
-For development, you can install all dependencies including testing and linting tools:
+To set up the development environment:
 
-```
-pip install -r requirements.txt
-```
+1. Clone the repository
+2. Install the required dependencies: `pip install -r requirements.txt`
+3. Run tests: `pytest`
 
-This will install pytest for testing, flake8 for linting, and black for code formatting.
+## Contributing
 
-## Creating standalone executables
-
-To create standalone executables for different platforms, you can use PyInstaller:
-
-```
-pyinstaller --onefile kubezap.py
-```
-
-This will create a single executable file in the `dist` directory.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
