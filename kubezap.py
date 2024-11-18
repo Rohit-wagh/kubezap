@@ -31,16 +31,54 @@ def get_config_files(download_location, conf_name, num_configs):
     return files[:num_configs]
 
 def merge_configs(existing_config, new_config):
-    for key in new_config:
-        if key in existing_config:
-            if isinstance(existing_config[key], dict) and isinstance(new_config[key], dict):
-                merge_configs(existing_config[key], new_config[key])
-            elif isinstance(existing_config[key], list) and isinstance(new_config[key], list):
-                existing_config[key].extend(new_config[key])
-            else:
-                existing_config[key] = new_config[key]
+    print("Merging configs...")
+    # Merge clusters
+    existing_clusters = {cluster['name']: cluster for cluster in existing_config.get('clusters', [])}
+    for new_cluster in new_config.get('clusters', []):
+        if new_cluster['name'] in existing_clusters:
+            print(f"Updating existing cluster: {new_cluster['name']}")
+            # Update existing cluster
+            for key, value in new_cluster['cluster'].items():
+                existing_clusters[new_cluster['name']]['cluster'][key] = value
         else:
+            print(f"Adding new cluster: {new_cluster['name']}")
+            # Add new cluster
+            existing_clusters[new_cluster['name']] = new_cluster
+    existing_config['clusters'] = list(existing_clusters.values())
+
+    # Merge contexts
+    existing_contexts = {context['name']: context for context in existing_config.get('contexts', [])}
+    for new_context in new_config.get('contexts', []):
+        if new_context['name'] in existing_contexts:
+            print(f"Updating existing context: {new_context['name']}")
+            # Update existing context
+            for key, value in new_context['context'].items():
+                existing_contexts[new_context['name']]['context'][key] = value
+        else:
+            print(f"Adding new context: {new_context['name']}")
+            # Add new context
+            existing_contexts[new_context['name']] = new_context
+    existing_config['contexts'] = list(existing_contexts.values())
+
+    # Merge users
+    existing_users = {user['name']: user for user in existing_config.get('users', [])}
+    for new_user in new_config.get('users', []):
+        if new_user['name'] in existing_users:
+            print(f"Updating existing user: {new_user['name']}")
+            # Update existing user
+            for key, value in new_user['user'].items():
+                existing_users[new_user['name']]['user'][key] = value
+        else:
+            print(f"Adding new user: {new_user['name']}")
+            # Add new user
+            existing_users[new_user['name']] = new_user
+    existing_config['users'] = list(existing_users.values())
+
+    # Update other top-level keys
+    for key in new_config:
+        if key not in ['clusters', 'contexts', 'users']:
             existing_config[key] = new_config[key]
+
     return existing_config
 
 def create_backup(kubeconfig_path):
@@ -68,8 +106,20 @@ def update_kubeconfig(kubeconfig_path, new_config_files):
             with open(new_config_file, 'r') as f:
                 new_config = yaml.safe_load(f)
             
+            original_clusters = set(c['name'] for c in existing_config.get('clusters', []))
+            original_contexts = set(c['name'] for c in existing_config.get('contexts', []))
+            original_users = set(u['name'] for u in existing_config.get('users', []))
+            
             existing_config = merge_configs(existing_config, new_config)
-            changes.append(f"Updated cluster from {new_config_file}")
+            
+            new_clusters = set(c['name'] for c in existing_config.get('clusters', [])) - original_clusters
+            new_contexts = set(c['name'] for c in existing_config.get('contexts', [])) - original_contexts
+            new_users = set(u['name'] for u in existing_config.get('users', [])) - original_users
+            
+            changes.append(f"Updated from {new_config_file}:")
+            changes.append(f"  Added clusters: {', '.join(new_clusters) if new_clusters else 'None'}")
+            changes.append(f"  Added contexts: {', '.join(new_contexts) if new_contexts else 'None'}")
+            changes.append(f"  Added users: {', '.join(new_users) if new_users else 'None'}")
 
         with open(kubeconfig_path, 'w') as f:
             yaml.dump(existing_config, f)
@@ -121,3 +171,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
