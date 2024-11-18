@@ -36,10 +36,7 @@ def main():
     try:
         kubeconfig_path = get_kubeconfig_path(args)
         if not kubeconfig_path.exists():
-            logger.info(f"Kubeconfig file not found. Creating an empty one at {kubeconfig_path}")
-            kubeconfig_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(kubeconfig_path, 'w') as f:
-                yaml.dump({'apiVersion': 'v1', 'kind': 'Config', 'clusters': [], 'contexts': [], 'users': []}, f)
+            raise FileNotFoundError(f"Kubeconfig file not found at {kubeconfig_path}. Please provide a valid kubeconfig file.")
 
         download_location = get_download_location(args)
         
@@ -89,12 +86,14 @@ def main():
             if not args.dry_run:
                 logger.info(f"Backup created in: {os.path.dirname(kubeconfig_path)}/kubezap_backups")
 
-    except Exception as e:
+    except ValueError as e:
         logger.error(Fore.RED + f"An error occurred: {str(e)}")
+    except FileNotFoundError as e:
+        logger.error(Fore.RED + f"File not found: {str(e)}")
+    except Exception as e:
+        logger.error(Fore.RED + f"An unexpected error occurred: {str(e)}")
         logger.debug("Error details:", exc_info=True)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-
-
 

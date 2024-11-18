@@ -5,10 +5,10 @@ from pathlib import Path
 def get_kubeconfig_path(args):
     if args.kubeconfig:
         return Path(args.kubeconfig).expanduser()
-    elif "KUBECONFIG_LOCATION" in os.environ:
-        return Path(os.environ["KUBECONFIG_LOCATION"]).expanduser()
+    elif "KUBECONFIG" in os.environ:
+        return Path(os.environ["KUBECONFIG"]).expanduser()
     else:
-        return Path.home() / ".kube" / "config"
+        raise ValueError("Kubeconfig file location not provided. Please specify using --kubeconfig or set KUBECONFIG environment variable.")
 
 
 def get_download_location(args):
@@ -17,11 +17,7 @@ def get_download_location(args):
     elif "DEFAULT_DOWNLOAD_LOCATION" in os.environ:
         location = Path(os.environ["DEFAULT_DOWNLOAD_LOCATION"]).expanduser()
     else:
-        location = Path.cwd()
-    
-    if not location.exists():
-        location.mkdir(parents=True, exist_ok=True)
-        print(f"Created directory: {location}")
+        raise ValueError("Download location not provided. Please specify using --download-location or set DEFAULT_DOWNLOAD_LOCATION environment variable.")
     
     return location
 
@@ -38,6 +34,4 @@ def get_config_files(download_location, conf_name, num_configs):
             key=os.path.getmtime, reverse=True
         )
     return files[:num_configs]
-
-
 
