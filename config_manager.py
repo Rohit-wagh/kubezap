@@ -1,124 +1,158 @@
 import yaml
 import difflib
+import yamale
 
-def merge_configs(existing_config, new_config):
-    """
-    Merge two kubeconfig configurations.
+import tempfile
 
-    Args:
-        existing_config (dict): The existing kubeconfig.
-        new_config (dict): The new kubeconfig to merge.
+def validate_kubeconfig(config_path):
+    schema_content = '''
+apiVersion: str()
+kind: str()
+clusters: list(include('cluster'))
+contexts: list(include('context'), required=False)
+users: list(include('user'), required=False)
+current-context: str(required=False)
+preferences: map(required=False)
 
-    Returns:
-        dict: The merged kubeconfig.
-    """
-    print("Merging configs...")
-    if not existing_config and not new_config:
-        return {}
+---
+cluster:
+  name: str()
+  cluster: map()
 
-    # Merge clusters
-    existing_clusters = {cluster['name']: cluster for cluster in existing_config.get('clusters', [])}
-    for new_cluster in new_config.get('clusters', []):
-        if new_cluster['name'] in existing_clusters:
-            print(f"Updating existing cluster: {new_cluster['name']}")
-            # Update existing cluster
-            for key, value in new_cluster['cluster'].items():
-                existing_clusters[new_cluster['name']]['cluster'][key] = value
-        else:
-            print(f"Adding new cluster: {new_cluster['name']}")
-            # Add new cluster
-            existing_clusters[new_cluster['name']] = new_cluster
-    if existing_clusters:
-        existing_config['clusters'] = list(existing_clusters.values())
+---
+context:
+  name: str()
+  context: map()
 
-    # Merge contexts
-    existing_contexts = {context['name']: context for context in existing_config.get('contexts', [])}
-    for new_context in new_config.get('contexts', []):
-        if new_context['name'] in existing_contexts:
-            print(f"Updating existing context: {new_context['name']}")
-            # Update existing context
-            for key, value in new_context['context'].items():
-                existing_contexts[new_context['name']]['context'][key] = value
-        else:
-            print(f"Adding new context: {new_context['name']}")
-            # Add new context
-            existing_contexts[new_context['name']] = new_context
-    if existing_contexts:
-        existing_config['contexts'] = list(existing_contexts.values())
+---
+user:
+  name: str()
+  user: map()
+'''
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_schema_file:
+        temp_schema_file.write(schema_content)
+        temp_schema_file.flush()
+        schema = yamale.make_schema(temp_schema_file.name)
 
-    # Merge users
-    existing_users = {user['name']: user for user in existing_config.get('users', [])}
-    for new_user in new_config.get('users', []):
-        if new_user['name'] in existing_users:
-            print(f"Updating existing user: {new_user['name']}")
-            # Update existing user
-            for key, value in new_user['user'].items():
-                existing_users[new_user['name']]['user'][key] = value
-        else:
-            print(f"Adding new user: {new_user['name']}")
-            # Add new user
-            existing_users[new_user['name']] = new_user
-    if existing_users:
-        existing_config['users'] = list(existing_users.values())
+    data = yamale.make_data(config_path)
+    try:
+        yamale.validate(schema, data)
+        return True, None
+    except ValueError as e:
+        return False, str(e)
+    finally:
+        import os
+        os.unlink(temp_schema_file.name)
 
-    # Update other top-level keys
-    for key in new_config:
-        if key not in ['clusters', 'contexts', 'users']:
-            existing_config[key] = new_config[key]
+import logging
 
-    return existing_config
+logger = logging.getLogger(__name__)
 
-def update_kubeconfig(kubeconfig_path, new_config_files, max_backups, show_diff=False):
+def update_kubeconfig(kubeconfig_path, new_config_files, max_backups, show_diff=False, dry_run=False):
     from backup_manager import create_backup, manage_backups
     import shutil
 
-    backup_path = create_backup(kubeconfig_path)
+    if not dry_run:
+        backup_path = create_backup(kubeconfig_path)
     
     try:
+        # Validate the existing kubeconfig
+        is_valid, error = validate_kubeconfig(kubeconfig_path)
+        if not is_valid:
+            raise ValueError(f"Invalid existing kubeconfig: {error}")
+
         with open(kubeconfig_path, 'r') as f:
             existing_config = yaml.safe_load(f)
+
+        logger.debug(f"Existing config: {existing_config}")
 
         changes = []
         diff_output = []
         for new_config_file in new_config_files:
+            # Validate the new config file
+            is_valid, error = validate_kubeconfig(new_config_file)
+            if not is_valid:
+                raise ValueError(f"Invalid new config file {new_config_file}: {error}")
+
             with open(new_config_file, 'r') as f:
                 new_config = yaml.safe_load(f)
             
+            logger.debug(f"New config from {new_config_file}: {new_config}")
+
             original_clusters = set(c['name'] for c in existing_config.get('clusters', []))
             original_contexts = set(c['name'] for c in existing_config.get('contexts', []))
             original_users = set(u['name'] for u in existing_config.get('users', []))
             
             updated_config = merge_configs(existing_config.copy(), new_config)
             
+            logger.debug(f"Updated config after merge: {updated_config}")
+
             new_clusters = set(c['name'] for c in updated_config.get('clusters', [])) - original_clusters
             new_contexts = set(c['name'] for c in updated_config.get('contexts', [])) - original_contexts
             new_users = set(u['name'] for u in updated_config.get('users', [])) - original_users
             
+            logger.debug(f"New clusters: {new_clusters}")
+            logger.debug(f"New contexts: {new_contexts}")
+            logger.debug(f"New users: {new_users}")
+
             if new_clusters or new_contexts or new_users or updated_config != existing_config:
                 changes.append(f"Updated from {new_config_file}:")
-                changes.append(f"  Added clusters: {', '.join(new_clusters) if new_clusters else 'None'}")
-                changes.append(f"  Added contexts: {', '.join(new_contexts) if new_contexts else 'None'}")
-                changes.append(f"  Added users: {', '.join(new_users) if new_users else 'None'}")
-
+                for cluster in new_clusters:
+                    changes.append(f"  Added cluster: {cluster}")
+                for context in new_contexts:
+                    changes.append(f"  Added context: {context}")
+                for user in new_users:
+                    changes.append(f"  Added user: {user}")
+                if 'current-context' in new_config and new_config['current-context'] != existing_config.get('current-context'):
+                    changes.append(f"  Updated current-context: {new_config['current-context']}")
+                
                 if show_diff:
-                    old_yaml = yaml.dump(existing_config, default_flow_style=False)
-                    new_yaml = yaml.dump(updated_config, default_flow_style=False)
-                    diff = list(difflib.unified_diff(old_yaml.splitlines(), new_yaml.splitlines(), fromfile='Old Config', tofile='New Config', lineterm=''))
-                    diff_output.extend(diff)
-
+                    diff = difflib.unified_diff(
+                        yaml.dump(existing_config, default_flow_style=False).splitlines(),
+                        yaml.dump(updated_config, default_flow_style=False).splitlines(),
+                        fromfile='Original',
+                        tofile='Updated',
+                        lineterm=''
+                    )
+                    diff_output.extend(list(diff))
+                
                 existing_config = updated_config
 
-        if changes:
+        if changes and not dry_run:
             with open(kubeconfig_path, 'w') as f:
-                yaml.dump(existing_config, f)
-            manage_backups(backup_path.parent, max_backups)
+                yaml.dump(existing_config, f, default_flow_style=False)
+            
+            manage_backups(kubeconfig_path, max_backups)
+            logger.info(f"Kubeconfig updated successfully. Backup created at {backup_path}")
+        elif changes and dry_run:
+            logger.info("Dry run: Changes would be made to the kubeconfig.")
         else:
-            # Remove the unnecessary backup if no changes were made
-            backup_path.unlink()
-
+            logger.info("No changes to be made to the kubeconfig.")
+            if not dry_run and 'backup_path' in locals() and backup_path.exists():
+                backup_path.unlink()
+    
         return changes, diff_output
     except Exception as e:
-        print(f"Error updating kubeconfig: {e}")
-        print("Rolling back to the previous version...")
-        shutil.copy2(backup_path, kubeconfig_path)
+        logger.error(f"Error updating kubeconfig: {e}")
+        if not dry_run and 'backup_path' in locals():
+            logger.info("Rolling back to the previous version...")
+            shutil.copy2(backup_path, kubeconfig_path)
         return [], []
+
+def merge_configs(existing_config, new_config):
+    for key in ['clusters', 'contexts', 'users']:
+        existing_items = {item['name']: item for item in existing_config.get(key, [])}
+        for new_item in new_config.get(key, []):
+            existing_items[new_item['name']] = new_item
+        existing_config[key] = list(existing_items.values())
+    
+    # Add or update current-context if present in new_config
+    if 'current-context' in new_config:
+        existing_config['current-context'] = new_config['current-context']
+    
+    logger.debug(f"Merged config: {existing_config}")
+    return existing_config
+
+
+

@@ -20,6 +20,27 @@ You can install KubeZap using pip:
 pip install kubezap
 ```
 
+## Enabling Autocompletion
+
+KubeZap supports command-line autocompletion. To enable it, follow these steps:
+
+1. Ensure you have argcomplete installed:
+   ```
+   pip install argcomplete
+   ```
+
+2. Add the following line to your shell's configuration file (e.g., ~/.bashrc, ~/.zshrc):
+   ```
+   eval "$(register-python-argcomplete kubezap)"
+   ```
+
+3. Restart your shell or run:
+   ```
+   source ~/.bashrc  # or ~/.zshrc if you're using Zsh
+   ```
+
+Now you can use tab completion for KubeZap commands and options.
+
 ## Usage
 
 ```
@@ -78,3 +99,5 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License.
+
+
