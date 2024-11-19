@@ -6,6 +6,7 @@ import textwrap
 
 __version__ = "1.0.0"
 
+
 class CustomFormatter(argparse.HelpFormatter):
     def __init__(self, prog):
         super().__init__(prog, max_help_position=40, width=100)
@@ -52,6 +53,7 @@ class CustomFormatter(argparse.HelpFormatter):
         )
         return f"{help}{env_vars}"
 
+
 class VersionAction(argparse.Action):
     def __init__(
         self,
@@ -77,12 +79,20 @@ class VersionAction(argparse.Action):
         print(version)
         parser.exit()
 
+
 def config_completer(prefix, parsed_args, **kwargs):
-    download_location = parsed_args.download_location or os.environ.get('DEFAULT_DOWNLOAD_LOCATION', '.')
-    return (f for f in glob.glob(os.path.join(download_location, prefix + '*')) if os.path.isfile(f))
+    download_location = parsed_args.download_location or os.environ.get(
+        "DEFAULT_DOWNLOAD_LOCATION", "."
+    )
+    return (
+        f
+        for f in glob.glob(os.path.join(download_location, prefix + "*"))
+        if os.path.isfile(f)
+    )
+
 
 def parse_args():
-    description = '''
+    description = """
     KubeZap: A tool to update kubeconfig with new configurations.
 
     This tool allows you to merge new kubeconfig files into your existing kubeconfig,
@@ -94,7 +104,7 @@ def parse_args():
     - Automatic rollback on failure
     - Detailed merge information in verbose mode
     - Diff output to show exact changes
-    '''
+    """
 
     parser = argparse.ArgumentParser(
         description=description,
@@ -102,25 +112,32 @@ def parse_args():
     )
 
     parser.add_argument(
-        "-k", "--kubeconfig",
+        "-k",
+        "--kubeconfig",
         help="Path to the kubeconfig file to update",
     )
     parser.add_argument(
-        "-l", "--download-location",
+        "-l",
+        "--download-location",
         help="Directory containing the new kubeconfig files",
     )
     parser.add_argument(
-        "-c", "--conf-name",
+        "-c",
+        "--conf-name",
         help="Name pattern for the new kubeconfig files",
+        nargs="*",
+        default=["config*.yaml"],
     )
     parser.add_argument(
-        "-n", "--number-of-configs",
+        "-n",
+        "--number-of-configs",
         type=int,
         default=1,
         help="Number of most recent config files to process",
     )
     parser.add_argument(
-        "-vv",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Increase output verbosity",
     )
@@ -130,13 +147,15 @@ def parse_args():
         version=f"KubeZap v{__version__}",
     )
     parser.add_argument(
-        "-b", "--backup",
+        "-b",
+        "--backup",
         type=int,
         default=5,
         help="Number of backup files to keep",
     )
     parser.add_argument(
-        "-d", "--diff",
+        "-d",
+        "--diff",
         action="store_true",
         help="Show diff of changes",
     )
@@ -149,10 +168,8 @@ def parse_args():
     argcomplete.autocomplete(parser)
     return parser.parse_args()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     args = parse_args()
     print(args)
-
-
-
 
